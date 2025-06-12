@@ -31,11 +31,15 @@ class AmbientContext(BaseModel):
     user_terminal_cmds: List[ExecutedCommand] = Field(default_factory=list)
 
 
+class Tenant(BaseModel):
+    tenant_name: Optional[str] = None
+    tenant_id: Optional[str] = None
+
 class Data(BaseModel):
     cmds: List[Command] = Field(default_factory=list)
     executed_cmds: List[ExecutedCommand] = Field(default_factory=list)
     url_configs: List[URLConfig] = Field(default_factory=list)
-
+    tenant: Optional[Tenant] = None
 
 class Message(BaseModel):
     role: Literal["user", "assistant"]
