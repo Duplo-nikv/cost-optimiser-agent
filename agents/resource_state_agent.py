@@ -6,11 +6,11 @@ import os
 from typing import List, Dict, Any, Optional
 
 from agent_server import AgentProtocol
-from schemas.messages import AgentMessage, Tenant, Data
+from schemas.messages import AgentMessage
 from services.llm import BedrockAnthropicLLM
 import requests
 from urllib3.exceptions import InsecureRequestWarning
-
+from utils.sentence_tokenizer import Get_token
 logger = logging.getLogger(__name__)
 
 class Resource(AgentProtocol):
