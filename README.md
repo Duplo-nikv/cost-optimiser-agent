@@ -1,48 +1,55 @@
 # 🧠 Cost Optimiser Agent (Beta)
 
-> A lightweight, AI-powered agent to help **reduce cloud costs** by automating the stopping and resuming of high-cost services.  
-> ⚠️ Currently in **beta** – lots of improvements are planned!
+> An AI-powered lightweight assistant to **reduce cloud costs** by automating actions like stopping and resuming high-cost services.  
+> ⚠️ This is a **beta version** with many improvements in progress.
 
 ---
 
 ## ✨ Features
 
-- 🚦 **Stop and Resume Services** based on cost-impact analysis  
-- ⚙️ Supports major AWS services: **RDS**, **ASG**, and **EC2**
-- 🗣️ Semantic command understanding (e.g., "stop running services" → stop operation)
+- 🔄 Automatically **stop or resume services** based on contextual understanding
+- 👁️ **Display the current state** of all supported resources
+- 📊 **Group resource status by type** (EC2, RDS, ASG)
+- 🤖 Supports **semantic understanding** of user commands
+- 🧭 Helps customers be **self-sufficient**, managing resources from one place
 
 ---
 
-## 📦 Currently Supported Resources
+## ✅ Currently Supported Resources
 
-| Resource Type | Actions Supported          |
-|---------------|-----------------------------|
-| EC2           | Stop / Start                |
-| RDS           | Stop / Start                |
-| ASG           | Scale In (stop) / Scale Out (resume) |
+| Resource Type | Supported Actions                     |
+|---------------|----------------------------------------|
+| EC2           | Stop / Start / Check State             |
+| RDS           | Stop / Start / Check State             |
+| ASG           | Scale In / Scale Out / Check State     |
 
----
-
-## ⚙️ How It Works
-
-The agent interprets operational commands and maps them to cost-saving actions. For example:
-
-- 🔴 `"stop all running resources"` → Stops active EC2, pauses ASG, and stops RDS
-- 🟢 `"start stopped services"` → Resumes stopped EC2, reactivates ASG, and starts RDS
+- Shows both **running** and **stopped** services
+- Resource states are **grouped by type**
+- Individual resource state changes are under development
 
 ---
 
-## 🚧 Limitations (Beta)
+## 🔍 Examples
 
-- 🧠 Semantic resolution is improving – may not cover all phrasings
-- 💰 No real-time billing data integration (yet)
-- 🌐 Supports AWS only (multi-cloud support in pipeline)
+The agent understands various natural-language commands:
 
----
+| Example Command                     | Action Performed                |
+|-------------------------------------|---------------------------------|
+| `"stop all running resources"`      | Stops EC2, scales in ASG, stops RDS |
+| `"start stopped services"`          | Starts EC2, RDS; scales out ASG |
+| `"show stopped services"`           | Displays all stopped resources |
+| `"list running resources"`          | Lists all active resources     |
 
-## 🚀 Getting Started
+**Output is grouped by resource type** like:
 
-```bash
-git clone https://github.com/your-org/cost-optimiser-agent.git
-cd cost-optimiser-agent
-docker-compose up --build
+```text
+EC2:
+- i-abc123 (running)
+- i-def456 (stopped)
+
+RDS:
+- db-prod (running)
+- db-test (stopped)
+
+ASG:
+- web-asg (2 instances running)
