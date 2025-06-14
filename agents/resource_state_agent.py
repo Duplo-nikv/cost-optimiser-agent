@@ -22,14 +22,15 @@ class Resource(AgentProtocol):
         Initialize the resource manager.
         """
         self.tenant_name=tenant_name
-        self.host_token = "AQAAANCMnd8BFdERjHoAwE_Cl-sBAAAAzSo9l_hs9UC987FR9ftCdQAAAAACAAAAAAAQZgAAAAEAACAAAABuElDGCEMFaFBhDQ1uMkPg1AEQApOutVACe_TMs32osQAAAAAOgAAAAAIAACAAAAADPn06ydfDw-_zpiFasTQOlKHPdeVTqUO3yynx79TJA8AAAABeRfFQ6gAyDcKSIzH0l0u55prh6nnnP3KA1RrGqvzllKuV2uz9jnMFGJY3wVkR4zRBmLdBsIXe-zzNuJ8pDV3hXmHS7D-9JYByWgYsaRLgnq8m2bf6ibkq_x6gJlasafcGso9jh0luA0uRQ8gwCbW8cZfD3rBD99Uvg6Qt5av7vbd2mfNvnqX84AFA8Z4HZF394OGhVRTfZqoCge4Vl2qOWUvUoJRH72uT8-6as1bg2S11Iqyo1tDwTHDLwxCEBIdAAAAAIEbwQZsqAugGN1UM6gVkyA8xV_0F_5wGrRnfToJM_snjmmxppBlzhf15nrWn2TOEdDePN359Te2EkwDZNuHyQA"
+        self.host_token = os.getenv("HOST_TOKEN")
         self.host_url = host_url
         self.tenant_id = tenant_id
         self.active_states = {
             "rds": ["available","stopped"],  # RDS instances
+            "ec2": ["running","stopped"],  # ec2 clusters
            # "opensearch": ["true"],  # OpenSearch domains
            # "ecache": ["available"],  # ElastiCache clusters
-           # "asg": ["Active", "InService"]  # Auto Scaling Groups
+            "asg": ["running", "stopped"]  # Auto Scaling Groups
         }
         requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
@@ -42,9 +43,8 @@ class Resource(AgentProtocol):
 
         endpoints = {
             "rds": f"v3/subscriptions/{self.tenant_id}/aws/rds/instance",
-           # "opensearch": "GetOpensearchDomains",
-           # "ecache": "GetElastiCacheInstances",
-           # "asg": "GetAutoScalingGroups"
+            "ec2": f"subscriptions/{self.tenant_id}/GetNativeHosts",
+            "asg": f"subscriptions/{self.tenant_id}/GetTenantAsgProfiles"
         }
         
         url = f"{self.host_url}/{endpoints[resource_type]}"
@@ -73,6 +73,28 @@ class Resource(AgentProtocol):
             "size": rds.get("AllocatedStorage")
         } for rds in rds_list]
 
+    def get_ec2_state(self) -> List[Dict[str, str]]:
+        """
+        Returns a list of dicts with EC2 instance name and state.
+        """
+        ec2_list = self._get_resource("ec2")
+        return [{
+            "name": ec2.get("FriendlyName"),
+            "state": ec2.get("Status"),
+            "instance_id": ec2.get("InstanceId")
+        } for ec2 in ec2_list if ec2.get("AgentPlatform") != 7]
+
+    def get_asg_state(self) -> List[Dict[str, str]]:
+        """
+        Returns a list of dicts with EC2 instance name and state.
+        """
+        asg_list = self._get_resource("asg")
+        return [{
+            "name": asg.get("FriendlyName"),
+            "state": "running" if asg.get("MaxSize", 0) > 0 and asg.get("MinSize", 0) > 0 else "stopped",
+        } for asg in asg_list]
+
+
     def get_resource_state(self, resource_type: str,inactive_state: bool) -> List[Dict[str, Any]]:
         """
         Get state of resources for a specific resource type.
@@ -84,17 +106,20 @@ class Resource(AgentProtocol):
         all_resources = getattr(self, f"get_{resource_type}_state")()
         
         # Filter for active/running resources
-        active_resources = []
+        entity = []
+        possibleState=self.active_states.get(resource_type, [])
         for resource in all_resources:
             state = resource.get("state", "").lower()
+
             if inactive_state:
-                if state in [s.lower() for s in self.active_states.get(resource_type, [])[1:]]:
-                    active_resources.append(resource)
+                
+                if state == possibleState[1]:
+                    entity.append(resource)
             else:
-                if state in [s.lower() for s in self.active_states.get(resource_type, [])]:
-                    active_resources.append(resource)
+                if state == possibleState[0]:
+                    entity.append(resource)
         
-        return active_resources
+        return entity
 
     def get_running_resources(self, inactive_state: bool) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -117,6 +142,7 @@ class Resource(AgentProtocol):
         If resource_type is specified, only the resources of that type that are currently running will be stopped.
         If resource_name is specified, only the resource with that name will be stopped.
         """
+        data = None
         resources = self.get_running_resources(inactive_state=False)
         if resource_type:
             resources = resources.get(resource_type, [])
@@ -125,17 +151,25 @@ class Resource(AgentProtocol):
         for resource_type,resource_details in resources.items():
            for resource in resource_details:
                 name = resource.get("name")
+                if resource_type == "ec2":
+                    name=resource.get("instance_id")
+                if resource_type == "asg":
+                    data = json.dumps({
+                        "FriendlyName": name,
+                        "MaxSize": 0,
+                        "MinSize": 0
+                    })
                 endpoint = self.get_stop_endpoint_resource(resource_type, name)
-                logger.info("*" * 50)
-                logger.info(f"Endpoint to stop: {endpoint}")
-                logger.info("*" * 50)
                 headers = {
                     "Authorization": f"Bearer {self.host_token}",
                     "Content-Type": "application/json",
                     "Accept": "application/json"
                 }
                 try:
-                    response = requests.post(endpoint, headers=headers, timeout=10, verify=False)
+                    logger.info("*" * 50)
+                    logger.info(f"Stopping resource {name} of type {resource_type} with endpoint {endpoint} having data body {data} and headers {headers}")
+                    logger.info("*" * 50)
+                    response = requests.post(endpoint, headers=headers, timeout=10, verify=False,data=data)
                     response.raise_for_status()
                 except Exception as e:
                     logger.error(f"Error stopping resource {name}: {e}")
@@ -146,9 +180,10 @@ class Resource(AgentProtocol):
         """
         endpoints = {
             "rds": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/rds/instance/{name}/stop",
+            "ec2": f"{self.host_url}/subscriptions/{self.tenant_id}/stopNativeHost/{name}",
           #  "opensearch": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/opensearch/{name}/stop",
           #  "ecache": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/ecache/{name}/stop",
-          #  "asg": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/asg/{name}/stop"
+            "asg": f"{self.host_url}/subscriptions/{self.tenant_id}/UpdateTenantAsgProfile"
         }
         return endpoints.get(resource_type, "")
 
@@ -160,6 +195,7 @@ class Resource(AgentProtocol):
         If resource_type is specified, only the resources of that type that are currently running will be stopped.
         If resource_name is specified, only the resource with that name will be stopped.
         """
+        data = None
         resources = self.get_running_resources(inactive_state=True)
         if resource_type:
             resources = resources.get(resource_type, [])
@@ -168,17 +204,22 @@ class Resource(AgentProtocol):
         for resource_type,resource_details in resources.items():
            for resource in resource_details:
                 name = resource.get("name")
+                if resource_type == "ec2":
+                    name=resource.get("instance_id")
+                if resource_type == "asg":
+                    data = json.dumps({
+                        "FriendlyName": name,
+                        "MaxSize": 2,
+                        "MinSize": 1
+                    })
                 endpoint = self.get_start_endpoint_resource(resource_type, name)
-                logger.info("*" * 50)
-                logger.info(f"Endpoint to start: {endpoint}")
-                logger.info("*" * 50)
                 headers = {
                     "Authorization": f"Bearer {self.host_token}",
                     "Content-Type": "application/json",
                     "Accept": "application/json"
                 }
                 try:
-                    response = requests.post(endpoint, headers=headers, timeout=10, verify=False)
+                    response = requests.post(endpoint, headers=headers, timeout=10, verify=False,data=data)
                     response.raise_for_status()
                 except Exception as e:
                     logger.error(f"Error stopping resource {name}: {e}")
@@ -189,9 +230,10 @@ class Resource(AgentProtocol):
         """
         endpoints = {
             "rds": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/rds/instance/{name}/start",
+            "ec2": f"{self.host_url}/subscriptions/{self.tenant_id}/startNativeHost/{name}",
           #  "opensearch": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/opensearch/{name}/stop",
           #  "ecache": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/ecache/{name}/stop",
-          #  "asg": f"{self.host_url}/v3/subscriptions/{self.tenant_id}/aws/asg/{name}/stop"
+            "asg": f"{self.host_url}/subscriptions/{self.tenant_id}/UpdateTenantAsgProfile"
         }
         return endpoints.get(resource_type, "")
 
@@ -207,7 +249,7 @@ class Resource(AgentProtocol):
                 for instance in instances:
                     name = instance.get("name", "")
                     state = instance.get("state", "")
-                    if custom_state.lower() is not "":
+                    if custom_state.lower() != "":
                         formatted_output.append(f"  - {name}: {custom_state.lower()}")                    
                     else:
                         formatted_output.append(f"  - {name}: {state}")
@@ -232,8 +274,11 @@ class StateResourceAgent(Resource):
         """
         Call the LLM with the provided messages and context.
         """
+        system_prompt=None
+        if any("tenant details" in msg.get("content","").lower() for msg in messages):
+
         # Create a comprehensive system prompt with tenant details
-        system_prompt = f"""
+            system_prompt = f"""
 You are Duplo Dash, a helpful assistant. Here are the details for the current context:
 Tenant ID: {self.tenant_id}
 Tenant Name: {self.tenant_name}
@@ -261,6 +306,11 @@ You are a precise echo. When the user provides a sentence, you must repeat it ex
 The resource being started in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
 You are a precise echo. When the user provides a sentence, you must repeat it exactly, without adding or removing anything. Do not change punctuation, casing, or formatting. Just return the exact sentence as-is.
 """
+        elif any("no resource found" in msg.get("content", "").lower() for msg in messages):
+            system_prompt += """
+            I couldnt find any resource that matches your query.
+            """
+            
         return self.llm.invoke(messages=messages, model_id=self.model_id, system_prompt=system_prompt)
 
     def preprocess_messages(self, messages: Dict[str, List[Dict[str, Any]]]):
@@ -283,57 +333,59 @@ You are a precise echo. When the user provides a sentence, you must repeat it ex
             if role=="user":
                 content = message.get("content", "")
                 #Processing to get all Active resources
-                if "all running" in content.lower() or "active resources" in content.lower():
-                    content=f"Here are the running resources for tenant {self.tenant_name}:\n\n"
-                    running_resources = self.get_running_resources(inactive_state=False)
-                    formatted_resources = self.format_resource_state(running_resources,custom_state="")
-                    content += f"\n\n{formatted_resources}"
-                    logger.info("*" * 50)
-                    logger.info(f"Content: {content}")
-                    logger.info("*" * 50)
-
+                token=Get_token(content.lower())
+                if token==Get_token("tenant detail"):
+                    content=f"tenant details"
                     preprocessed_message={
                         "role": "user",
                         "content": content
                     }
                     preprocessed_messages.append(preprocessed_message)
-                elif "get all stopped" in content.lower() or "get inactive resources" in content.lower() or "show inactive resources" in content.lower() or "show all stopped" in content.lower():
+
+                elif token==Get_token("get all runnning resources"):
+                    content=f"Here are the running resources for tenant {self.tenant_name}:\n\n"
+                    running_resources = self.get_running_resources(inactive_state=False)
+                    formatted_resources = self.format_resource_state(running_resources,custom_state="")
+                    content += f"\n\n{formatted_resources}"
+                    if formatted_resources =="":
+                        content="no resource found"
+                    preprocessed_message={
+                        "role": "user",
+                        "content": content
+                    }
+                    preprocessed_messages.append(preprocessed_message)
+                elif token==Get_token("get all stopped resources"):
                     content=f"Here are the stopped resources for tenant {self.tenant_name}:\n\n"
                     stopped_resources = self.get_running_resources(inactive_state=True)
                     formatted_resources = self.format_resource_state(stopped_resources,custom_state="")
                     content += f"\n\n{formatted_resources}"
-                    logger.info("*" * 50)
-                    logger.info(f"Content: {content}")
-                    logger.info("*" * 50)
+                    if formatted_resources =="":
+                        content="no resource found"
 
                     preprocessed_message={
                         "role": "user",
                         "content": content
                     }
                     preprocessed_messages.append(preprocessed_message)  
-                elif "start" in content.lower() or "resume" in content.lower():
+                elif token==Get_token("start all stopped resources"):
                     content=f"Starting all resources for tenant {self.tenant_name}..."
-                    formatted_resources = self.format_resource_state(running_resources,custom_state="starting")
+                    stopped_resources = self.get_running_resources(inactive_state=True)
+                    formatted_resources = self.format_resource_state(stopped_resources,custom_state="starting")
                     self.start_resources()
                     content += f"\n\n{formatted_resources}"
-                    logger.info("*" * 50)
-                    logger.info(f"Content: {content}")
-                    logger.info("*" * 50)
-
+                   
                     preprocessed_message={
                         "role": "user",
                         "content": content
                     }
                     preprocessed_messages.append(preprocessed_message)
-                elif "stop all" in content.lower() or "stop" in content.lower() or "pause" in content.lower():
+                elif token==Get_token("stop all running resources"):
                     content=f"Stopping all resources for tenant {self.tenant_name}..."
+                    running_resources = self.get_running_resources(inactive_state=False)
                     formatted_resources = self.format_resource_state(running_resources,custom_state="stopping")
                     self.stop_resources()
                     content += f"\n\n{formatted_resources}"
-                    logger.info("*" * 50)
-                    logger.info(f"Content: {content}")
-                    logger.info("*" * 50)
-
+                   
                     preprocessed_message={
                         "role": "user",
                         "content": content
@@ -365,12 +417,9 @@ You are a precise echo. When the user provides a sentence, you must repeat it ex
         Process user messages and use an LLM to generate responses.
         """
         preprocessed_messages = self.preprocess_messages(messages)
-        logger.info(f"Preprocessed messages: {preprocessed_messages}")
 
         response = self.call_bedrock_anthropic_llm(preprocessed_messages)
-      #  logger.info(f"LLM response: {response}")
 
         return AgentMessage(content=response)
 
     
-

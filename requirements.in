@@ -6,3 +6,4 @@ dotenv
 tk
 requests
 langchain_community
+sentence-transformers

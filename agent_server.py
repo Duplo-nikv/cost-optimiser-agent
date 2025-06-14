@@ -66,8 +66,8 @@ def create_chat_app(agent: AgentProtocol) -> FastAPI:
             logger.error("Validation error in agent: %s", ve)
             raise HTTPException(status_code=500,
                                 detail=f"Agent returned invalid Message: {ve}")
-        #except Exception as e:
-        #    logger.error("Exception in agent: %s", e)
-        #    raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.error("Exception in agent: %s", e)
+            raise HTTPException(status_code=500, detail=str(e))
 
     return app
