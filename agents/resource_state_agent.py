@@ -274,42 +274,28 @@ class StateResourceAgent(Resource):
         """
         Call the LLM with the provided messages and context.
         """
-        system_prompt=None
+        system_prompt="""
+        You are Duplo Dash, a helpful assistant focused on reducing cost by managing resources by stopping the resources when not in use and starting the resources when in use. Here are the details for the current context:
+        """
         if any("tenant details" in msg.get("content","").lower() for msg in messages):
 
         # Create a comprehensive system prompt with tenant details
-            system_prompt = f"""
-You are Duplo Dash, a helpful assistant. Here are the details for the current context:
-Tenant ID: {self.tenant_id}
-Tenant Name: {self.tenant_name}
-Platform URL: {self.host_url}
+            system_prompt += self.tenantDetail_prompt()
+        if any("running resources" in msg.get("content", "").lower() or "0" in msg.get("content", "").lower() for msg in messages):
 
-You can answer questions about:
-1. Tenant information (ID, name)
-2. Platform details (URL)
-3. Resource states and configurations
+            system_prompt += self.all_runningResources_prompt(messages)
 
-When answering questions about tenant or platform details, use the stored information above.
-"""
-        if any("running resources" in msg.get("content", "").lower() for msg in messages):
-            system_prompt += f"""
-The running resource in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
-You are a precise echo. When the user provides a sentence, you must repeat it exactly, without adding or removing anything. Do not change punctuation, casing, or formatting. Just return the exact sentence as-is.
-"""
-        elif any("Stopping all" in msg.get("content", "").lower() for msg in messages):
-            system_prompt += f"""
-The resource being stopped in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
-You are a precise echo. When the user provides a sentence, you must repeat it exactly, without adding or removing anything. Do not change punctuation, casing, or formatting. Just return the exact sentence as-is.
-"""
-        elif any("Starting all" in msg.get("content", "").lower() for msg in messages):
-            system_prompt += f"""
-The resource being started in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
-You are a precise echo. When the user provides a sentence, you must repeat it exactly, without adding or removing anything. Do not change punctuation, casing, or formatting. Just return the exact sentence as-is.
-"""
-        elif any("no resource found" in msg.get("content", "").lower() for msg in messages):
-            system_prompt += """
-            I couldnt find any resource that matches your query.
-            """
+        elif any("stopping all" in msg.get("content", "").lower() or "2" in msg.get("content", "").lower() for msg in messages):
+
+            system_prompt += self.stopAllResources_prompt(messages)
+
+        elif any("starting all" in msg.get("content", "").lower() or "3" in msg.get("content", "").lower() for msg in messages):
+
+            system_prompt += self.startAllResources_prompt(messages)
+
+        elif any("stopped resources" in msg.get("content", "").lower() or "1" in msg.get("content", "").lower() for msg in messages):
+        
+            system_prompt += self.all_stoppedResources_prompt(messages)
             
         return self.llm.invoke(messages=messages, model_id=self.model_id, system_prompt=system_prompt)
 
@@ -326,72 +312,36 @@ You are a precise echo. When the user provides a sentence, you must repeat it ex
             # Update instance variables with platform context
             if platform_ctx:
 
-                host_url = platform_ctx.get("duplo_host_url", "")
+                host_url = platform_ctx.get("duplo_base_url", "")
                 tenant_id = platform_ctx.get("tenant_id", "")
                 tenant_name = platform_ctx.get("tenant_name", "")
                 super().__init__(host_url=host_url, tenant_name=tenant_name, tenant_id=tenant_id)          
+            
             if role=="user":
+
                 content = message.get("content", "")
-                #Processing to get all Active resources
                 token=Get_token(content.lower())
+
                 if token==Get_token("tenant detail"):
-                    content=f"tenant details"
-                    preprocessed_message={
-                        "role": "user",
-                        "content": content
-                    }
-                    preprocessed_messages.append(preprocessed_message)
 
-                elif token==Get_token("get all runnning resources"):
-                    content=f"Here are the running resources for tenant {self.tenant_name}:\n\n"
-                    running_resources = self.get_running_resources(inactive_state=False)
-                    formatted_resources = self.format_resource_state(running_resources,custom_state="")
-                    content += f"\n\n{formatted_resources}"
-                    if formatted_resources =="":
-                        content="no resource found"
-                    preprocessed_message={
-                        "role": "user",
-                        "content": content
-                    }
-                    preprocessed_messages.append(preprocessed_message)
+                  preprocessed_messages.append(tenant_details())
+
+                elif token==Get_token("get all runnning resources"):   
+
+                    preprocessed_messages.append(all_running_resources())
+
                 elif token==Get_token("get all stopped resources"):
-                    content=f"Here are the stopped resources for tenant {self.tenant_name}:\n\n"
-                    stopped_resources = self.get_running_resources(inactive_state=True)
-                    formatted_resources = self.format_resource_state(stopped_resources,custom_state="")
-                    content += f"\n\n{formatted_resources}"
-                    if formatted_resources =="":
-                        content="no resource found"
 
-                    preprocessed_message={
-                        "role": "user",
-                        "content": content
-                    }
-                    preprocessed_messages.append(preprocessed_message)  
+                    preprocessed_messages.append(all_stopped_resources())  
+
                 elif token==Get_token("start all stopped resources"):
-                    content=f"Starting all resources for tenant {self.tenant_name}..."
-                    stopped_resources = self.get_running_resources(inactive_state=True)
-                    formatted_resources = self.format_resource_state(stopped_resources,custom_state="starting")
-                    self.start_resources()
-                    content += f"\n\n{formatted_resources}"
-                   
-                    preprocessed_message={
-                        "role": "user",
-                        "content": content
-                    }
-                    preprocessed_messages.append(preprocessed_message)
+
+                    preprocessed_messages.append(start_all_stopped_resources())
+
                 elif token==Get_token("stop all running resources"):
-                    content=f"Stopping all resources for tenant {self.tenant_name}..."
-                    running_resources = self.get_running_resources(inactive_state=False)
-                    formatted_resources = self.format_resource_state(running_resources,custom_state="stopping")
-                    self.stop_resources()
-                    content += f"\n\n{formatted_resources}"
-                   
-                    preprocessed_message={
-                        "role": "user",
-                        "content": content
-                    }
-                    preprocessed_messages.append(preprocessed_message)
-                
+
+                    preprocessed_messages.append(stop_all_running_resources())
+    
                 else:
                     preprocessed_messages.append({
                         "role": role,
@@ -402,12 +352,6 @@ You are a precise echo. When the user provides a sentence, you must repeat it ex
                 "role": role,
                 "content": message.get("content", "")
             })
-
-            
-        # Add tenant details to the first message if it's from the user
-        #if preprocessed_messages and preprocessed_messages[0]["role"] == "user":
-        #    first_msg = preprocessed_messages[0]
-        #    first_msg["content"] = f"Tenant ID: {self.tenant_id}\nTenant Name: {self.tenant_name}\n{first_msg["content"]}"
             
         return preprocessed_messages
        
@@ -423,3 +367,97 @@ You are a precise echo. When the user provides a sentence, you must repeat it ex
         return AgentMessage(content=response)
 
     
+    def tenant_details(self)->Dict[str,Any]:
+        content=f"tenant details"
+        return  {
+              "role": "user",
+              "content": content
+          }
+
+    def all_running_resources(self)->Dict[str,Any]:
+        content=f"Here are the running resources for tenant {self.tenant_name}:\n\n"
+        running_resources = self.get_running_resources(inactive_state=False)
+        formatted_resources = self.format_resource_state(running_resources,custom_state="")
+        content += f"\n\n{formatted_resources}"
+        if formatted_resources =="":
+            content="0"
+        return  {
+              "role": "user",
+              "content": content
+          }                
+
+    def all_stopped_resources(self)->Dict[str,Any]:
+        content=f"Here are the stopped resources for tenant {self.tenant_name}:\n\n"
+        stopped_resources = self.get_running_resources(inactive_state=True)
+        formatted_resources = self.format_resource_state(stopped_resources,custom_state="")
+        content += f"\n\n{formatted_resources}"
+        if formatted_resources =="":
+            content="1"
+        return  {
+              "role": "user",
+              "content": content
+          }                
+
+    def start_all_stopped_resources(self)->Dict[str,Any]:
+        content=f"Starting all resources for tenant {self.tenant_name}..."
+        stopped_resources = self.get_running_resources(inactive_state=True)
+        formatted_resources = self.format_resource_state(stopped_resources,custom_state="starting")
+        self.start_resources()
+        content += f"\n\n{formatted_resources}"
+        if formatted_resources =="":
+            content="2" 
+        return  {
+              "role": "user",
+              "content": content
+          }                                
+    
+    def stop_all_running_resources(self)->Dict[str,Any]:
+        content=f"Stopping all resources for tenant {self.tenant_name}..."
+        running_resources = self.get_running_resources(inactive_state=False)
+        formatted_resources = self.format_resource_state(running_resources,custom_state="stopping")
+        self.stop_resources()
+        content += f"\n\n{formatted_resources}"
+        if formatted_resources =="":
+            content="3" 
+        return  {
+              "role": "user",
+              "content": content
+          }                                
+                    
+    def tenantDetail_prompt(self)->str:
+        return f"""
+Tenant ID: {self.tenant_id}
+Tenant Name: {self.tenant_name}
+Platform URL: {self.host_url}
+
+You can answer questions about:
+1. Tenant information (ID, name)
+2. Platform details (URL)
+3. Resource states and configurations
+
+When answering questions about tenant or platform details, use the stored information above.
+"""
+
+    def all_runningResources_prompt(self,messages: list)->str:
+                return f"""
+The running resource in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
+When answering questions about running resources, use the stored information above.
+"""
+    def all_stoppedResources_prompt(self,messages: list)->str:
+        return f"""
+The stopped resource in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
+When answering questions about stopped resources, use the stored information above.
+""" 
+    def stopAllResources_prompt(messages: list)->str:  
+        content=messages[-1].get("content", "") 
+        return f"""
+The resource being stopped in tenant {self.tenant_name} is {content}.
+When answering questions about stopping all resources, use the stored information above. if content is 2 it means there are no resources to stop.
+"""
+    
+    def startAllResources_prompt(messages: list)->str:  
+        content=messages[-1].get("content", "") 
+        return f"""
+The resource being started in tenant {self.tenant_name} is {content}.
+When answering questions about starting all resources, use the stored information above. if content is 3 it means there are no resources to start.
+"""
