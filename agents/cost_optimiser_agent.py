@@ -1,3 +1,4 @@
+
 import json
 import logging
 from queue import Empty
@@ -10,7 +11,6 @@ from schemas.messages import AgentMessage
 from services.llm import BedrockAnthropicLLM
 import requests
 from urllib3.exceptions import InsecureRequestWarning
-from utils.sentence_tokenizer import Get_token
 logger = logging.getLogger(__name__)
 
 class Resource(AgentProtocol):
@@ -109,15 +109,18 @@ class Resource(AgentProtocol):
         entity = []
         possibleState=self.active_states.get(resource_type, [])
         for resource in all_resources:
-            state = resource.get("state", "").lower()
-
-            if inactive_state:
-                
-                if state == possibleState[1]:
-                    entity.append(resource)
-            else:
-                if state == possibleState[0]:
-                    entity.append(resource)
+           # state = resource.get("state", "").lower()
+           # obj=f"{resource.get('name')} : {state}"
+            entity.append(resource)
+            #if inactive_state:
+            #    
+            #    if state == possibleState[1]:
+            #        obj=f"{resource.get('name')} : {state}"
+            #        entity.append(obj)
+            #else:
+            #    if state == possibleState[0]:
+            #        obj=f"{resource.get('name')} : {state}"
+            #        entity.append(obj)
         
         return entity
 
@@ -166,9 +169,6 @@ class Resource(AgentProtocol):
                     "Accept": "application/json"
                 }
                 try:
-                    logger.info("*" * 50)
-                    logger.info(f"Stopping resource {name} of type {resource_type} with endpoint {endpoint} having data body {data} and headers {headers}")
-                    logger.info("*" * 50)
                     response = requests.post(endpoint, headers=headers, timeout=10, verify=False,data=data)
                     response.raise_for_status()
                 except Exception as e:
@@ -257,7 +257,7 @@ class Resource(AgentProtocol):
         
         return "\n".join(formatted_output)
 
-class StateResourceAgent(Resource):
+class CostOptimiserAgent(Resource):
     """
     An agent that creates RDS resource.
     """
@@ -267,8 +267,46 @@ class StateResourceAgent(Resource):
         Initialize the CommandAgent with an LLM instance and optional custom system prompt.
         """
         self.llm = llm
-        self.model_id = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0")
+        self.model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
+        self.token="t0"
+    def call_llm_for_token(self, messages: list) -> str:
+        """
+        Given a list of message dicts (chat format), return a semantic operation token like t0, t1, ..., t4.
+        The LLM is guided with a system prompt that explains the task clearly.
+        """
+        system_prompt = """
+You are an intelligent command router. Based on the user's request, return the correct operation token from the list below.
+Respond only with the token ID. Do not explain or add anything else.
 
+Token mappings:
+- tenant details → t0
+- get running resource → t1
+- get stopped resource → t2
+- stop running resources → t3
+- start stopped resources → t4
+
+If the user asks anything semantically similar, choose the appropriate token.
+Examples:
+- "show me tenant info" → t0
+- "list active resources" → t1
+- "bring up stopped instances" → t4
+- "pause all services" → t3
+- "retrieve halted machines" → t2
+
+Now process the request and return the correct token.
+"""
+
+        response = self.llm.invoke(
+            messages=messages,
+            model_id=self.model_id,
+            system_prompt=system_prompt.strip()
+        )
+
+        # Assuming content has only the token
+        token = response.strip().lower()
+        # Optionally validate if it's one of the expected tokens
+        valid_tokens = {"t0", "t1", "t2", "t3", "t4"}
+        return token if token in valid_tokens else "fallback"
 
     def call_bedrock_anthropic_llm(self, messages: list):
         """
@@ -276,24 +314,25 @@ class StateResourceAgent(Resource):
         """
         system_prompt="""
         You are Duplo Dash, a helpful assistant focused on reducing cost by managing resources by stopping the resources when not in use and starting the resources when in use. Here are the details for the current context:
+        You should only introduce yourself if user greets you, dont specify any other information until specificaly asked.
         """
-        if any("tenant details" in msg.get("content","").lower() for msg in messages):
+        if any("t0" in msg.get("content","").lower() for msg in messages):
 
-        # Create a comprehensive system prompt with tenant details
             system_prompt += self.tenantDetail_prompt()
-        if any("running resources" in msg.get("content", "").lower() or "0" in msg.get("content", "").lower() for msg in messages):
+
+        if any("t1" in msg.get("content", "").lower() or "-0" in msg.get("content", "").lower() for msg in messages):
 
             system_prompt += self.all_runningResources_prompt(messages)
 
-        elif any("stopping all" in msg.get("content", "").lower() or "2" in msg.get("content", "").lower() for msg in messages):
+        elif any("t3" in msg.get("content", "").lower() or "-2" in msg.get("content", "").lower() for msg in messages):
 
             system_prompt += self.stopAllResources_prompt(messages)
 
-        elif any("starting all" in msg.get("content", "").lower() or "3" in msg.get("content", "").lower() for msg in messages):
+        elif any("t4" in msg.get("content", "").lower() or "-3" in msg.get("content", "").lower() for msg in messages):
 
             system_prompt += self.startAllResources_prompt(messages)
 
-        elif any("stopped resources" in msg.get("content", "").lower() or "1" in msg.get("content", "").lower() for msg in messages):
+        elif any("t2" in msg.get("content", "").lower() or "-1" in msg.get("content", "").lower() for msg in messages):
         
             system_prompt += self.all_stoppedResources_prompt(messages)
             
@@ -319,28 +358,25 @@ class StateResourceAgent(Resource):
             
             if role=="user":
 
-                content = message.get("content", "")
-                token=Get_token(content.lower())
+                #content = message.get("content", "")
+                if "t0"==self.token:
+                  preprocessed_messages.append(self.tenant_details())
 
-                if token==Get_token("tenant detail"):
+                elif "t1"==self.token:
 
-                  preprocessed_messages.append(tenant_details())
+                    preprocessed_messages.append(self.all_running_resources())
 
-                elif token==Get_token("get all runnning resources"):   
+                elif "t2"==self.token:
 
-                    preprocessed_messages.append(all_running_resources())
+                    preprocessed_messages.append(self.all_stopped_resources())  
 
-                elif token==Get_token("get all stopped resources"):
+                elif "t4"==self.token:
 
-                    preprocessed_messages.append(all_stopped_resources())  
+                    preprocessed_messages.append(self.start_all_stopped_resources())
 
-                elif token==Get_token("start all stopped resources"):
+                elif "t3"==self.token:
 
-                    preprocessed_messages.append(start_all_stopped_resources())
-
-                elif token==Get_token("stop all running resources"):
-
-                    preprocessed_messages.append(stop_all_running_resources())
+                    preprocessed_messages.append(self.stop_all_running_resources())
     
                 else:
                     preprocessed_messages.append({
@@ -360,65 +396,58 @@ class StateResourceAgent(Resource):
         """
         Process user messages and use an LLM to generate responses.
         """
+        token_messages=self.preprocess_message_for_token(messages)
+        self.token=self.call_llm_for_token(token_messages)
         preprocessed_messages = self.preprocess_messages(messages)
-
+        
         response = self.call_bedrock_anthropic_llm(preprocessed_messages)
-
         return AgentMessage(content=response)
 
     
     def tenant_details(self)->Dict[str,Any]:
-        content=f"tenant details"
+        content=f"t0"
         return  {
               "role": "user",
               "content": content
           }
 
     def all_running_resources(self)->Dict[str,Any]:
-        content=f"Here are the running resources for tenant {self.tenant_name}:\n\n"
+        content=f"t1:\n\n"
         running_resources = self.get_running_resources(inactive_state=False)
         formatted_resources = self.format_resource_state(running_resources,custom_state="")
         content += f"\n\n{formatted_resources}"
-        if formatted_resources =="":
-            content="0"
         return  {
               "role": "user",
               "content": content
           }                
 
     def all_stopped_resources(self)->Dict[str,Any]:
-        content=f"Here are the stopped resources for tenant {self.tenant_name}:\n\n"
+        content=f"t2:\n\n"
         stopped_resources = self.get_running_resources(inactive_state=True)
         formatted_resources = self.format_resource_state(stopped_resources,custom_state="")
         content += f"\n\n{formatted_resources}"
-        if formatted_resources =="":
-            content="1"
         return  {
               "role": "user",
               "content": content
           }                
 
     def start_all_stopped_resources(self)->Dict[str,Any]:
-        content=f"Starting all resources for tenant {self.tenant_name}..."
+        content=f"t4"
         stopped_resources = self.get_running_resources(inactive_state=True)
         formatted_resources = self.format_resource_state(stopped_resources,custom_state="starting")
         self.start_resources()
         content += f"\n\n{formatted_resources}"
-        if formatted_resources =="":
-            content="2" 
         return  {
               "role": "user",
               "content": content
           }                                
     
     def stop_all_running_resources(self)->Dict[str,Any]:
-        content=f"Stopping all resources for tenant {self.tenant_name}..."
+        content=f"t3"
         running_resources = self.get_running_resources(inactive_state=False)
         formatted_resources = self.format_resource_state(running_resources,custom_state="stopping")
         self.stop_resources()
         content += f"\n\n{formatted_resources}"
-        if formatted_resources =="":
-            content="3" 
         return  {
               "role": "user",
               "content": content
@@ -439,25 +468,60 @@ When answering questions about tenant or platform details, use the stored inform
 """
 
     def all_runningResources_prompt(self,messages: list)->str:
-                return f"""
-The running resource in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
+        sentence=messages[-1].get("content", "") 
+        word_to_remove="t1"
+        new_sentence = sentence.replace(word_to_remove, "")
+        cleaned_sentence = ' '.join(new_sentence.split())
+        content=cleaned_sentence
+
+        return f"""
+The running resource in tenant {self.tenant_name} is {content}.
 When answering questions about running resources, use the stored information above.
 """
     def all_stoppedResources_prompt(self,messages: list)->str:
+        sentence=messages[-1].get("content", "") 
+        word_to_remove="t2"
+        new_sentence = sentence.replace(word_to_remove, "")
+        cleaned_sentence = ' '.join(new_sentence.split())
+        content=cleaned_sentence
         return f"""
-The stopped resource in tenant {self.tenant_name} is {messages[-1].get("content", "")}.
+The stopped resource in tenant {self.tenant_name} is {content}.
 When answering questions about stopped resources, use the stored information above.
 """ 
-    def stopAllResources_prompt(messages: list)->str:  
-        content=messages[-1].get("content", "") 
+    def stopAllResources_prompt(self,messages: list)->str:  
+        sentence=messages[-1].get("content", "") 
+        word_to_remove="t3"
+        new_sentence = sentence.replace(word_to_remove, "")
+        cleaned_sentence = ' '.join(new_sentence.split())
+        content=cleaned_sentence
+        
         return f"""
-The resource being stopped in tenant {self.tenant_name} is {content}.
-When answering questions about stopping all resources, use the stored information above. if content is 2 it means there are no resources to stop.
+Here resource has been put to stop, but it will take some time to stop in tenant {self.tenant_name} is {content}.
+When answering questions about stopping all resources, use the stored information above.
 """
     
-    def startAllResources_prompt(messages: list)->str:  
-        content=messages[-1].get("content", "") 
+    def startAllResources_prompt(self,messages: list)->str:  
+        sentence=messages[-1].get("content", "") 
+        word_to_remove="t4"
+        new_sentence = sentence.replace(word_to_remove, "")
+        cleaned_sentence = ' '.join(new_sentence.split())
+        content=cleaned_sentence
         return f"""
-The resource being started in tenant {self.tenant_name} is {content}.
-When answering questions about starting all resources, use the stored information above. if content is 3 it means there are no resources to start.
+Here resource has been put to start, but it will take some time to start in tenant {self.tenant_name} is {content}.
+When answering questions about starting all resources, use the stored information above.
 """
+
+
+
+    def preprocess_message_for_token(self,messages: list)->str:
+        preprocessed_messages = []
+        messages_list = messages.get("messages", [])
+        # Set host_url and tenant_id from platform context
+        message= messages_list[-1].get("content", "")   
+        preprocessed_messages.append({
+            "role": "user",
+            "content": message
+        })
+        return preprocessed_messages
+
+    

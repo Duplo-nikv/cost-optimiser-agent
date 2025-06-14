@@ -9,7 +9,7 @@ from agents.echo_agent import EchoAgent
 from agents.llm_passthrough_agent import LLMPassthroughAgent
 from agents.cmd_agent import CommandAgent
 from agents.boilerplate_agent import BoilerplateAgent
-from agents.resource_state_agent import StateResourceAgent
+from agents.cost_optimiser_agent import CostOptimiserAgent
 import dotenv
 
 # Load environment variables from .env file and override existing ones
@@ -20,7 +20,7 @@ dotenv.load_dotenv(override=True)
 #agent = LLMPassthroughAgent(BedrockAnthropicLLM())
 #agent = CommandAgent(BedrockAnthropicLLM())
 # agent = BoilerplateAgent()  # Default to the boilerplate agent
-agent = StateResourceAgent(BedrockAnthropicLLM())
+agent = CostOptimiserAgent(BedrockAnthropicLLM())
 app = create_chat_app(agent)
 
 
