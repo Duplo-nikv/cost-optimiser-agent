@@ -7,7 +7,9 @@ import os
 class LLMPassthroughAgent(AgentProtocol):
     def __init__(self, llm: BedrockAnthropicLLM):
         self.llm = llm
-        self.model_id = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0")
+        # self.model_id = "us.anthropic.claude-3-5-sonnet-20240620-v1:0"
+        # self.model_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+        self.model_id = "us.anthropic.claude-opus-4-20250514-v1:0"
 
     def call_bedrock_anthropic_llm(self, messages: list):
         system_prompt = "You are a helpful assistant name Duplo Dash."

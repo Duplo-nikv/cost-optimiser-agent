@@ -11,6 +11,7 @@ from agents.cmd_agent import CommandAgent
 from agents.boilerplate_agent import BoilerplateAgent
 from agents.cost_optimiser_agent import CostOptimiserAgent
 import dotenv
+import uvicorn
 
 # Load environment variables from .env file and override existing ones
 dotenv.load_dotenv(override=True)
@@ -25,7 +26,6 @@ app = create_chat_app(agent)
 
 
 if __name__ == "__main__":
-    import uvicorn
         
     # For reload to work, we need to use an import string instead of the app object
     uvicorn.run(

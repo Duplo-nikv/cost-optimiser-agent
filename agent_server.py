@@ -5,6 +5,7 @@ from schemas.messages import AgentMessage
 import logging
 import os
 from schemas.messages import Messages
+import traceback
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -38,6 +39,10 @@ def create_chat_app(agent: AgentProtocol) -> FastAPI:
     # ----- chat endpoint -----------------------------------------------------
     @app.post("/api/sendMessage", response_model=AgentMessage, tags=["chat"])
     def send_message(raw_body: Dict[str, Any] = Body(...)) -> AgentMessage:
+       
+        # log request body
+        logger.info("Request Body:", raw_body)
+
         # 1. validate presence of 'messages'
         if "messages" not in raw_body:
             raise HTTPException(status_code=400,
@@ -66,8 +71,10 @@ def create_chat_app(agent: AgentProtocol) -> FastAPI:
             logger.error("Validation error in agent: %s", ve)
             raise HTTPException(status_code=500,
                                 detail=f"Agent returned invalid Message: {ve}")
-        #except Exception as e:
-        #    logger.error("Exception in agent: %s", e)
-        #    raise HTTPException(status_code=500, detail=str(e))
+
+        except Exception as e:
+            traceback_error = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+            logger.error("Unhandled exception in agent:\n%s", traceback_error)
+            raise HTTPException(status_code=500, detail=str(e))
 
     return app
