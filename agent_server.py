@@ -68,7 +68,6 @@ def create_chat_app(agent: AgentProtocol) -> FastAPI:
                 timestamp=assistant_msg.timestamp,
                 user=assistant_msg.user,
                 agent=assistant_msg.agent,
-                platform_context=platform_context  # Pass through platform context
             )
 
             # Log and return response with platform context
