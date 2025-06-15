@@ -60,6 +60,7 @@ class UserMessage(Message):
 
 class AgentMessage(Message):
     role: Literal["assistant"] = "assistant"
+    platform_context: Optional[PlatformContext] = None
 
 
 class Messages(BaseModel):

@@ -4,9 +4,9 @@ from pydantic import ValidationError
 from schemas.messages import AgentMessage
 import logging
 import os
-from schemas.messages import Messages
+from schemas.messages import Messages, UserMessage, AgentMessage
 import traceback
-
+import json
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s | %(name)s | %(message)s",
@@ -39,9 +39,8 @@ def create_chat_app(agent: AgentProtocol) -> FastAPI:
     # ----- chat endpoint -----------------------------------------------------
     @app.post("/api/sendMessage", response_model=AgentMessage, tags=["chat"])
     def send_message(raw_body: Dict[str, Any] = Body(...)) -> AgentMessage:
-       
-        # log request body
-        logger.info("Request Body:", raw_body)
+        # Log request details with JSON formatting
+        logger.info(f"\nRequest Details:\nURL: /api/sendMessage\nMethod: POST\nRequest Body:\n{json.dumps(raw_body, indent=2)}")
 
         # 1. validate presence of 'messages'
         if "messages" not in raw_body:
@@ -49,18 +48,33 @@ def create_chat_app(agent: AgentProtocol) -> FastAPI:
                                 detail="'messages' field missing from request body")
 
         try:
+            # Parse request messages
             msgs_obj = Messages.model_validate({"messages": raw_body["messages"]})
-        except ValidationError as ve:
-            raise HTTPException(status_code=422, detail=ve.errors())
+            
+            # Extract platform context from the last user message if it exists
+            last_user_msg = next((msg for msg in msgs_obj.messages if isinstance(msg, UserMessage)), None)
+            platform_context = last_user_msg.platform_context if last_user_msg else None
+            
+            # Convert to dict and pass to agent
+            msgs_dict = msgs_obj.model_dump()
+            logger.info(f"Invoking agent with messages: {json.dumps(msgs_dict, indent=2)}")
+            assistant_msg = agent.invoke(msgs_dict)
+            
+            # Create response with platform context
+            response_msg = AgentMessage(
+                role="assistant",
+                content=assistant_msg.content,
+                data=assistant_msg.data,
+                timestamp=assistant_msg.timestamp,
+                user=assistant_msg.user,
+                agent=assistant_msg.agent,
+                platform_context=platform_context  # Pass through platform context
+            )
 
-        # 2. delegate to agent
-        try:
-            # Pass the raw messages dictionary directly to the agent
-            msgs_obj = msgs_obj.model_dump()
-            logger.info("Invoking agent with messages: %s", msgs_obj)
-            assistant_msg = agent.invoke(msgs_obj)
-
-            logger.info("Assistant message: %s", assistant_msg)
+            # Log and return response with platform context
+            response_dict = response_msg.model_dump()
+            logger.info(f"\nResponse Details:\nStatus: Success\nResponse Body:\n{json.dumps(response_dict, indent=2)}")
+            return response_msg
 
             # Still validate the response format
             assistant_msg = AgentMessage.model_validate(assistant_msg)  # schema guardrail
