@@ -51,10 +51,6 @@ def create_chat_app(agent: AgentProtocol) -> FastAPI:
             # Parse request messages
             msgs_obj = Messages.model_validate({"messages": raw_body["messages"]})
             
-            # Extract platform context from the last user message if it exists
-            last_user_msg = next((msg for msg in msgs_obj.messages if isinstance(msg, UserMessage)), None)
-            platform_context = last_user_msg.platform_context if last_user_msg else None
-            
             # Convert to dict and pass to agent
             msgs_dict = msgs_obj.model_dump()
             logger.info(f"Invoking agent with messages: {json.dumps(msgs_dict, indent=2)}")
