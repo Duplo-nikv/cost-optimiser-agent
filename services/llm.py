@@ -42,7 +42,6 @@ class BedrockAnthropicLLM:
                 )
         else:
             self.bedrock_runtime = boto3.client('bedrock-runtime', region_name=region_name)
-    
     def invoke(
         self,
         messages: list,

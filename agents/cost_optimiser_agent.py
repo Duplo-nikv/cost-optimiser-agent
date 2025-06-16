@@ -38,6 +38,7 @@ class Resource(AgentProtocol):
         """
         Helper method to fetch resources of a given type for a tenant.
         """
+        logger.info(f"HOST_TOKEN {self.host_token}")
         if resource_type not in self.active_states:
             raise ValueError(f"Unsupported resource type: {resource_type}")
 
@@ -145,6 +146,8 @@ class Resource(AgentProtocol):
         If resource_type is specified, only the resources of that type that are currently running will be stopped.
         If resource_name is specified, only the resource with that name will be stopped.
         """
+        logger.info(f"HOST_TOKEN {self.host_token}")
+
         data = None
         resources = self.get_running_resources(inactive_state=False)
         if resource_type:
@@ -195,6 +198,7 @@ class Resource(AgentProtocol):
         If resource_type is specified, only the resources of that type that are currently running will be stopped.
         If resource_name is specified, only the resource with that name will be stopped.
         """
+        logger.info(f"HOST_TOKEN {self.host_token}")
         data = None
         resources = self.get_running_resources(inactive_state=True)
         if resource_type:
@@ -358,24 +362,25 @@ Now process the request and return the correct token.
             
             if role=="user":
 
-                #content = message.get("content", "")
                 if "t0"==self.token:
+                  logger.info("token t0 : tenant detail process selected")
                   preprocessed_messages.append(self.tenant_details())
 
                 elif "t1"==self.token:
+                   logger.info("token t1 : get running resource process selected")
 
-                    preprocessed_messages.append(self.all_running_resources())
+                   preprocessed_messages.append(self.all_running_resources())
 
                 elif "t2"==self.token:
-
+                    logger.info("token t2 : get stopped resource process selected")
                     preprocessed_messages.append(self.all_stopped_resources())  
 
                 elif "t4"==self.token:
-
+                    logger.info("token t4 : stop started resources process selected")
                     preprocessed_messages.append(self.start_all_stopped_resources())
 
                 elif "t3"==self.token:
-
+                    logger.info("token t3 : stop running resources process selected")
                     preprocessed_messages.append(self.stop_all_running_resources())
     
                 else:
@@ -396,6 +401,7 @@ Now process the request and return the correct token.
         """
         Process user messages and use an LLM to generate responses.
         """
+
         token_messages=self.preprocess_message_for_token(messages)
         self.token=self.call_llm_for_token(token_messages)
         preprocessed_messages = self.preprocess_messages(messages)
